@@ -152,6 +152,8 @@ public:
         m_nodes(compd_size * num_colors(location::vertex),
                 nodes_totald_size * num_colors(location::vertex)) {}
 
+  GT_FUNCTION 
+  size_t compd_size() { return m_compd_size; }
   GT_FUNCTION
   size_t totald_size() { return m_totald_size; }
 

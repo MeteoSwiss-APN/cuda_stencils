@@ -4,6 +4,7 @@ enum ustencils {
   ucopy_st = 0,
   ucopymesh_st,
   uoncells_st,
+  uoncells_ilp_st,
   uoncellsmesh_st,
   uoncellsmesh_hilbert_st,
   complex_uoncells_st,
