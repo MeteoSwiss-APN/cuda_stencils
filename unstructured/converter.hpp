@@ -16,8 +16,8 @@ size_t get_cell_idx(std::unordered_map<size_t, size_t> &halo_idxs_pairs,
 
 void fill_halo_cells(std::unordered_map<size_t, size_t> &halo_idxs_pairs,
                      mesh &mesh_, uelements &ucells, int i, int c, int j,
-                     size_t isize, size_t jsize, size_t nhalo,
-                     size_t &halo_idx) {
+                     size_t isize, size_t jsize, size_t nhalo, size_t &halo_idx,
+                     bool ende = false) {
   size_t cell_idx =
       get_cell_idx(halo_idxs_pairs,
                    mesh_.get_elements(location::cell).index(i, c, j), halo_idx);
@@ -70,28 +70,26 @@ void mesh_to_hilbert(umesh &umesh_, mesh &mesh_) {
 
   auto ucells = umesh_.get_elements(location::cell);
 
-  std::cout << "size " << inds.size() << std::endl;
   for (size_t idx = 0; idx != inds.size(); ++idx) {
     int i = inds[idx][0];
     int j = inds[idx][1];
 
     if (idx % 1000 == 0)
-      std::cout << "Hilber -> " << idx << std::endl;
-    // color 0
-    if (i > 0) {
-      auto pos =
-          std::find(inds.begin(), inds.end(), std::array<int, 2>{i - 1, j});
-      assert(pos != std::end(inds));
+      // color 0
+      if (i > 0) {
+        auto pos =
+            std::find(inds.begin(), inds.end(), std::array<int, 2>{i - 1, j});
+        assert(pos != std::end(inds));
 
-      ucells.table(location::cell)(idx * 2, 0) =
-          std::distance(inds.begin(), pos) * 2 + 1;
+        ucells.table(location::cell)(idx * 2, 0) =
+            std::distance(inds.begin(), pos) * 2 + 1;
 
-    } else {
-      ucells.table(location::cell)(idx * 2, 0) = halo_idx;
-      halo_idxs_pairs[mesh_.get_elements(location::cell)
-                          .neighbor(location::cell, i - 1, 0, j, 0)] = halo_idx;
-      halo_idx++;
-    }
+      } else {
+        ucells.table(location::cell)(idx * 2, 0) = halo_idx;
+        halo_idxs_pairs[mesh_.get_elements(location::cell)
+                            .neighbor(location::cell, i, 0, j, 0)] = halo_idx;
+        halo_idx++;
+      }
 
     {
       auto pos = std::find(inds.begin(), inds.end(), std::array<int, 2>{i, j});
@@ -109,8 +107,9 @@ void mesh_to_hilbert(umesh &umesh_, mesh &mesh_) {
           std::distance(inds.begin(), pos) * 2 + 1;
     } else {
       ucells.table(location::cell)(idx * 2, 2) = halo_idx;
+
       halo_idxs_pairs[mesh_.get_elements(location::cell)
-                          .neighbor(location::cell, i, 0, j - 1, 2)] = halo_idx;
+                          .neighbor(location::cell, i, 0, j, 2)] = halo_idx;
       halo_idx++;
     }
 
@@ -123,9 +122,10 @@ void mesh_to_hilbert(umesh &umesh_, mesh &mesh_) {
       ucells.table(location::cell)(idx * 2 + 1, 0) =
           std::distance(inds.begin(), pos) * 2;
     } else {
+
       ucells.table(location::cell)(idx * 2 + 1, 0) = halo_idx;
       halo_idxs_pairs[mesh_.get_elements(location::cell)
-                          .neighbor(location::cell, i + 1, 1, j, 0)] = halo_idx;
+                          .neighbor(location::cell, i, 1, j, 0)] = halo_idx;
       halo_idx++;
     }
 
@@ -146,7 +146,7 @@ void mesh_to_hilbert(umesh &umesh_, mesh &mesh_) {
     } else {
       ucells.table(location::cell)(idx * 2 + 1, 2) = halo_idx;
       halo_idxs_pairs[mesh_.get_elements(location::cell)
-                          .neighbor(location::cell, i, 1, j + 1, 2)] = halo_idx;
+                          .neighbor(location::cell, i, 1, j, 2)] = halo_idx;
       halo_idx++;
     }
 
@@ -189,20 +189,17 @@ void mesh_to_hilbert(umesh &umesh_, mesh &mesh_) {
     }
   }
 
-  /*
-    for (int i = -(int)mesh_.nhalo(); i < (int)mesh_.isize() +
-    (int)mesh_.nhalo();
-         ++i) {
-      for (size_t c = 0; c < num_colors(location::cell); ++c) {
-        for (int j = (int)mesh_.jsize();
-             j < (int)mesh_.jsize() + (int)mesh_.nhalo(); ++j) {
-          fill_halo_cells(halo_idxs_pairs, mesh_, ucells, i, c, j,
-    mesh_.isize(),
-                          mesh_.jsize(), mesh_.nhalo(), halo_idx);
-        }
+  for (int i = -(int)mesh_.nhalo(); i < (int)mesh_.isize() + (int)mesh_.nhalo();
+       ++i) {
+    for (size_t c = 0; c < num_colors(location::cell); ++c) {
+      for (int j = (int)mesh_.jsize();
+           j < (int)mesh_.jsize() + (int)mesh_.nhalo(); ++j) {
+        fill_halo_cells(halo_idxs_pairs, mesh_, ucells, i, c, j, mesh_.isize(),
+                        mesh_.jsize(), mesh_.nhalo(), halo_idx, true);
       }
     }
-  */
+  }
+
   for (size_t cnt = 0; cnt != mesh_.nodes_totald_size(); ++cnt) {
     umesh_.get_nodes().x(cnt) = mesh_.get_nodes().x(cnt);
     umesh_.get_nodes().y(cnt) = mesh_.get_nodes().y(cnt);

@@ -43,6 +43,94 @@
 #include "udefs.hpp"
 #include "neighbours_table.hpp"
 
+class mesh_indexer {
+public:
+  mesh_indexer(location loc, size_t isize, size_t jsize, size_t nhalow,
+               size_t nhalos, size_t nhaloe, size_t nhalon)
+      : m_loc(loc), m_isize(isize), m_jsize(jsize), m_nhalow(nhalow),
+        m_nhalos(nhalos), m_nhaloe(nhaloe), m_nhalon(nhalon) {}
+
+private:
+  location m_loc;
+  size_t m_isize, m_jsize;
+  size_t m_nhalow, m_nhalos, m_nhaloe, m_nhalon;
+
+public:
+  size_t last_compute_domain_idx() {
+    return (m_isize)*num_colors(m_loc) * (m_jsize);
+  }
+  size_t last_west_halo_idx() {
+    return last_compute_domain_idx() + m_jsize * m_nhalow * num_colors(m_loc);
+  }
+  size_t last_south_halo_idx() {
+    return last_west_halo_idx() +
+           m_nhalos * (m_nhalow + m_isize) * num_colors(m_loc);
+  }
+  size_t last_east_halo_idx() {
+    return last_south_halo_idx() +
+           (m_nhalos + m_jsize) * m_nhaloe * num_colors(m_loc);
+  }
+  size_t last_north_halo_idx() {
+    return last_east_halo_idx() +
+           m_nhalon * num_colors(m_loc) * (m_isize + m_nhalow * 2);
+  }
+
+  size_t index(int i, unsigned int c, int j) {
+    assert(i >= -(int)m_nhalow && i < (int)(m_isize + m_nhaloe));
+    assert(c < num_colors(m_loc));
+    assert(j >= -(int)m_nhalos && j < (int)(m_jsize + m_nhalon));
+
+    if (i >= 0 && i < (int)m_isize && j >= 0 && j < (int)m_jsize) {
+      int idx = i + c * m_isize + j * num_colors(m_loc) * m_isize;
+      if (idx >= last_compute_domain_idx()) {
+        std::cout << "WARNING IN COMPUTE DOMAIN : " << i << "," << c << "," << j
+                  << ": " << last_compute_domain_idx() << " -> " << idx
+                  << std::endl;
+      }
+      return idx;
+    }
+    if (i < 0 && j >= 0 && j < (int)m_jsize) {
+      int idx = (int)last_compute_domain_idx() - i - 1 + c * m_nhalow +
+                j * m_nhalow * num_colors(m_loc);
+      if (idx >= last_west_halo_idx())
+        std::cout << "WARNING IN WEST : " << i << "," << c << "," << j << ": "
+                  << last_west_halo_idx() << " -> " << idx << std::endl;
+
+      return idx;
+    }
+    if (j < 0 && i < (int)m_isize) {
+      int idx = last_west_halo_idx() + (i + m_nhalow) +
+                c * (m_nhalow + m_isize) +
+                (-j - 1) * (m_nhalow + m_isize) * num_colors(m_loc);
+      if (idx >= last_south_halo_idx())
+        std::cout << "WARNING IN SOUTH : " << i << "," << c << "," << j << ": "
+                  << last_south_halo_idx() << " -> " << idx << std::endl;
+      return idx;
+    }
+    if (i >= (int)m_isize && j < (int)m_jsize) {
+      int idx = last_south_halo_idx() + (i - (int)m_isize) + c * m_nhaloe +
+                (j + (int)m_nhalos) * m_nhaloe * num_colors(m_loc);
+      if (idx >= last_east_halo_idx())
+        std::cout << "WARNING IN EAST : " << last_east_halo_idx() << " -> "
+                  << idx << std::endl;
+      return idx;
+    }
+    if (j >= (int)m_jsize) {
+      int idx =
+          last_east_halo_idx() + (i + m_nhalow) +
+          c * (m_isize + m_nhalow + m_nhaloe) +
+          (j - m_jsize) * num_colors(m_loc) * (m_isize + m_nhalow + m_nhaloe);
+      if (idx >= last_north_halo_idx())
+        std::cout << "WARNING IN NORTH : " << last_north_halo_idx() << " -> "
+                  << idx << std::endl;
+
+      return idx;
+    }
+    std::cout << "ERROR " << std::endl;
+    return 0;
+  }
+};
+
 class elements {
   static constexpr size_t size_of_array(const location primary_loc,
                                         const unsigned int isize,
@@ -58,7 +146,8 @@ public:
         m_elements_to_cells(primary_loc, location::cell, isize, jsize, nhalo),
         m_elements_to_edges(primary_loc, location::edge, isize, jsize, nhalo),
         m_elements_to_vertices(primary_loc, location::vertex, isize, jsize,
-                               nhalo) {
+                               nhalo),
+        m_indexer(primary_loc, isize, jsize, nhalo, nhalo, nhalo, nhalo) {
 #ifdef ENABLE_GPU
     cudaMallocManaged(&m_idx, size_of_array(primary_loc, isize, jsize, nhalo));
 #else
@@ -162,6 +251,7 @@ private:
   size_t m_isize, m_jsize, m_nhalo;
   sneighbours_table m_elements_to_cells, m_elements_to_edges,
       m_elements_to_vertices;
+  mesh_indexer m_indexer;
 };
 
 class nodes {
@@ -202,7 +292,93 @@ public:
     return (m_isize + m_nhalo * 2) * (m_jsize + m_nhalo * 2);
   }
 
-  size_t last_compute_domain_idx() { return m_isize * m_jsize; }
+  size_t last_compute_domain_idx() {
+    return (m_isize)*num_colors(location::vertex) * (m_jsize);
+  }
+  size_t last_ghost_east_halo_idx() {
+    return last_compute_domain_idx() + m_jsize + num_colors(location::vertex);
+  }
+  size_t last_ghost_north_halo_idx() {
+    return last_ghost_east_halo_idx() + (m_isize + 1);
+  }
+  size_t last_west_halo_idx() {
+    return last_ghost_north_halo_idx() +
+           (m_jsize + 1) * m_nhalo * num_colors(location::vertex);
+  }
+  size_t last_south_halo_idx() {
+    return last_west_halo_idx() +
+           m_nhalo * (m_nhalo + (m_isize + 1)) * num_colors(location::vertex);
+  }
+  size_t last_east_halo_idx() {
+    return last_south_halo_idx() +
+           (m_nhalo + (m_jsize + 1)) * m_nhalo * num_colors(location::vertex);
+  }
+  size_t last_north_halo_idx() {
+    return last_east_halo_idx() +
+           m_nhalo * num_colors(location::vertex) *
+               ((m_isize + 1) + m_nhalo * 2);
+  }
+
+  size_t index(int i, unsigned int c, int j) {
+    assert(i >= -(int)m_nhalo && i < (int)(m_isize + m_nhalo));
+    assert(c < num_colors(location::vertex));
+    assert(j >= -(int)m_nhalo && j < (int)(m_jsize + m_nhalo));
+
+    if (i >= 0 && i < (int)m_isize && j >= 0 && j < (int)m_jsize) {
+      int idx = i + j * num_colors(location::vertex) * m_isize;
+      if (idx >= last_compute_domain_idx()) {
+        std::cout << "WARNING IN COMPUTE DOMAIN : " << i << "," << c << "," << j
+                  << ": " << last_compute_domain_idx() << " -> " << idx
+                  << std::endl;
+      }
+      return idx;
+    }
+    if (i == (int)m_isize && j >= 0 && j < (int)m_jsize) {
+      int idx = (int)last_compute_domain_idx() + j;
+      return idx;
+    }
+    if (j == (int)m_jsize && i >= 0 && i < ((int)m_isize + 1)) {
+      int idx = (int)last_ghost_east_halo_idx() + i;
+    }
+    if (i < 0 && j >= 0 && j < (int)m_jsize) {
+      int idx = (int)last_ghost_north_halo_idx() - i - 1 +
+                j * m_nhalo * num_colors(location::vertex);
+      if (idx >= last_west_halo_idx())
+        std::cout << "WARNING IN WEST : " << i << "," << c << "," << j << ": "
+                  << last_west_halo_idx() << " -> " << idx << std::endl;
+
+      return idx;
+    }
+    if (j < 0 && i < (int)m_isize) {
+      int idx =
+          last_west_halo_idx() + (i + m_nhalo) +
+          (-j - 1) * (m_nhalo + (m_isize + 1)) * num_colors(location::vertex);
+      if (idx >= last_south_halo_idx())
+        std::cout << "WARNING IN SOUTH : " << i << "," << c << "," << j << ": "
+                  << last_south_halo_idx() << " -> " << idx << std::endl;
+      return idx;
+    }
+    if (i >= (int)m_isize && j < (int)m_jsize) {
+      int idx = last_south_halo_idx() + (i - ((int)m_isize + 1)) +
+                (j + (int)m_nhalo) * m_nhalo * num_colors(location::vertex);
+      if (idx >= last_east_halo_idx())
+        std::cout << "WARNING IN EAST : " << last_east_halo_idx() << " -> "
+                  << idx << std::endl;
+      return idx;
+    }
+    if (j >= (int)m_jsize) {
+      int idx = last_east_halo_idx() + (i + m_nhalo) +
+                (j - ((int)m_jsize + 1)) * num_colors(location::vertex) *
+                    (((int)m_isize + 1) + 2 * m_nhalo);
+      if (idx >= last_north_halo_idx())
+        std::cout << "WARNING IN NORTH : " << last_north_halo_idx() << " -> "
+                  << idx << std::endl;
+
+      return idx;
+    }
+    std::cout << "ERROR " << std::endl;
+    return 0;
+  }
 
   size_t &neighbor(location neigh_loc, int i, unsigned int c, int j,
                    unsigned int neigh_idx) {
@@ -310,169 +486,117 @@ public:
     for (size_t i = 0; i < isize; ++i) {
       for (size_t j = 0; j < jsize; ++j) {
         // cell to cell
-        if (i > 0)
-          m_cells.neighbor(location::cell, i, 0, j, 0) =
-              index(location::cell, i - 1, 1, j);
-        m_cells.neighbor(location::cell, i, 0, j, 1) =
-            index(location::cell, i, 1, j);
-        if (j > 0)
-          m_cells.neighbor(location::cell, i, 0, j, 2) =
-              index(location::cell, i, 1, j - 1);
+        m_cells.neighbor(location::cell, i, 0, j, 0) =
+            m_cells.index(i - 1, 1, j);
+        m_cells.neighbor(location::cell, i, 0, j, 1) = m_cells.index(i, 1, j);
+        m_cells.neighbor(location::cell, i, 0, j, 2) =
+            m_cells.index(i, 1, j - 1);
 
-        if (i < isize - 1)
-          m_cells.neighbor(location::cell, i, 1, j, 0) =
-              index(location::cell, i + 1, 0, j);
-        m_cells.neighbor(location::cell, i, 1, j, 1) =
-            index(location::cell, i, 0, j);
-        if (j < jsize - 1)
-          m_cells.neighbor(location::cell, i, 1, j, 2) =
-              index(location::cell, i, 0, j + 1);
+        m_cells.neighbor(location::cell, i, 1, j, 0) =
+            m_cells.index(i + 1, 0, j);
+        m_cells.neighbor(location::cell, i, 1, j, 1) = m_cells.index(i, 0, j);
+        m_cells.neighbor(location::cell, i, 1, j, 2) =
+            m_cells.index(i, 0, j + 1);
 
         // cell to edge
-        m_cells.neighbor(location::edge, i, 0, j, 0) =
-            index(location::edge, i, 1, j);
-        m_cells.neighbor(location::edge, i, 0, j, 1) =
-            index(location::edge, i, 2, j);
-        m_cells.neighbor(location::edge, i, 0, j, 2) =
-            index(location::edge, i, 0, j);
+        m_cells.neighbor(location::edge, i, 0, j, 0) = m_edges.index(i, 1, j);
+        m_cells.neighbor(location::edge, i, 0, j, 1) = m_edges.index(i, 2, j);
+        m_cells.neighbor(location::edge, i, 0, j, 2) = m_edges.index(i, 0, j);
 
-        if (i < isize - 1)
-          m_cells.neighbor(location::edge, i, 1, j, 0) =
-              index(location::edge, i + 1, 1, j);
-        m_cells.neighbor(location::edge, i, 1, j, 1) =
-            index(location::edge, i, 2, j);
-        if (j < jsize - 1)
-          m_cells.neighbor(location::edge, i, 1, j, 2) =
-              index(location::edge, i, 0, j + 1);
+        m_cells.neighbor(location::edge, i, 1, j, 0) =
+            m_edges.index(i + 1, 1, j);
+        m_cells.neighbor(location::edge, i, 1, j, 1) = m_edges.index(i, 2, j);
+        m_cells.neighbor(location::edge, i, 1, j, 2) =
+            m_edges.index(i, 0, j + 1);
 
-        if (j < jsize - 1)
-          m_cells.neighbor(location::vertex, i, 0, j, 0) =
-              index(location::vertex, i, 0, j + 1);
+        m_cells.neighbor(location::vertex, i, 0, j, 0) =
+            m_nodes.index(i, 0, j + 1);
 
-        if (i < isize - 1) {
-          m_cells.neighbor(location::vertex, i, 0, j, 1) =
-              index(location::vertex, i + 1, 0, j);
-        }
-        m_cells.neighbor(location::vertex, i, 0, j, 2) =
-            index(location::vertex, i, 0, j);
+        m_cells.neighbor(location::vertex, i, 0, j, 1) =
+            m_nodes.index(i + 1, 0, j);
+        m_cells.neighbor(location::vertex, i, 0, j, 2) = m_nodes.index(i, 0, j);
 
-        if (j < jsize - 1)
-          m_cells.neighbor(location::vertex, i, 1, j, 0) =
-              index(location::vertex, i, 0, j + 1);
+        m_cells.neighbor(location::vertex, i, 1, j, 0) =
+            m_nodes.index(i, 0, j + 1);
 
-        if (j < jsize - 1 && i < isize - 1)
-          m_cells.neighbor(location::vertex, i, 1, j, 1) =
-              index(location::vertex, i + 1, 0, j + 1);
+        m_cells.neighbor(location::vertex, i, 1, j, 1) =
+            m_nodes.index(i + 1, 0, j + 1);
 
-        if (i < isize - 1)
-          m_cells.neighbor(location::vertex, i, 1, j, 2) =
-              index(location::vertex, i + 1, 0, j);
+        m_cells.neighbor(location::vertex, i, 1, j, 2) =
+            m_nodes.index(i + 1, 0, j);
 
         // edge to edge
-        if (j > 0)
-          m_edges.neighbor(location::edge, i, 0, j, 0) =
-              index(location::edge, i, 2, j - 1);
-        m_edges.neighbor(location::edge, i, 0, j, 1) =
-            index(location::edge, i, 1, j);
-        if (j > 0 && i < isize - 1)
-          m_edges.neighbor(location::edge, i, 0, j, 2) =
-              index(location::edge, i + 1, 1, j - 1);
-        m_edges.neighbor(location::edge, i, 0, j, 3) =
-            index(location::edge, i, 2, j);
-        m_edges.neighbor(location::edge, i, 1, j, 0) =
-            index(location::edge, i, 0, j);
-        if (i > 0)
-          m_edges.neighbor(location::edge, i, 1, j, 1) =
-              index(location::edge, i - 1, 2, j);
-        if (i > 0 && j < jsize - 1)
-          m_edges.neighbor(location::edge, i, 1, j, 2) =
-              index(location::edge, i - 1, 0, j + 1);
-        m_edges.neighbor(location::edge, i, 1, j, 3) =
-            index(location::edge, i, 2, j);
-        m_edges.neighbor(location::edge, i, 2, j, 0) =
-            index(location::edge, i, 0, j);
-        m_edges.neighbor(location::edge, i, 2, j, 1) =
-            index(location::edge, i, 1, j);
-        if (i < isize - 1)
-          m_edges.neighbor(location::edge, i, 2, j, 2) =
-              index(location::edge, i + 1, 1, j);
-        if (j < jsize - 1)
-          m_edges.neighbor(location::edge, i, 2, j, 3) =
-              index(location::edge, i, 0, j + 1);
+        m_edges.neighbor(location::edge, i, 0, j, 0) =
+            m_edges.index(i, 2, j - 1);
+        m_edges.neighbor(location::edge, i, 0, j, 1) = m_edges.index(i, 1, j);
+        m_edges.neighbor(location::edge, i, 0, j, 2) =
+            m_edges.index(i + 1, 1, j - 1);
+        m_edges.neighbor(location::edge, i, 0, j, 3) = m_edges.index(i, 2, j);
+        m_edges.neighbor(location::edge, i, 1, j, 0) = m_edges.index(i, 0, j);
+        m_edges.neighbor(location::edge, i, 1, j, 1) =
+            m_edges.index(i - 1, 2, j);
+        m_edges.neighbor(location::edge, i, 1, j, 2) =
+            m_edges.index(i - 1, 0, j + 1);
+        m_edges.neighbor(location::edge, i, 1, j, 3) = m_edges.index(i, 2, j);
+        m_edges.neighbor(location::edge, i, 2, j, 0) = m_edges.index(i, 0, j);
+        m_edges.neighbor(location::edge, i, 2, j, 1) = m_edges.index(i, 1, j);
+        // TODO rename element_index, remove location param  since it is
+        // redundant
+        // and remove index function in this header
+        m_edges.neighbor(location::edge, i, 2, j, 2) =
+            m_edges.index(i + 1, 1, j);
+        m_edges.neighbor(location::edge, i, 2, j, 3) =
+            m_edges.index(i, 0, j + 1);
 
-        if (j > 0)
-          m_edges.neighbor(location::cell, i, 0, j, 0) =
-              index(location::cell, i, 1, j - 1);
-        m_edges.neighbor(location::cell, i, 0, j, 1) =
-            index(location::cell, i, 0, j);
-        if (i > 0)
-          m_edges.neighbor(location::cell, i, 1, j, 0) =
-              index(location::cell, i - 1, 1, j);
-        m_edges.neighbor(location::cell, i, 1, j, 1) =
-            index(location::cell, i, 0, j);
+        m_edges.neighbor(location::cell, i, 0, j, 0) =
+            m_cells.index(i, 1, j - 1);
+        m_edges.neighbor(location::cell, i, 0, j, 1) = m_cells.index(i, 0, j);
+        m_edges.neighbor(location::cell, i, 1, j, 0) =
+            m_cells.index(i - 1, 1, j);
+        m_edges.neighbor(location::cell, i, 1, j, 1) = m_cells.index(i, 0, j);
 
-        m_edges.neighbor(location::cell, i, 2, j, 0) =
-            index(location::cell, i, 1, j);
-        m_edges.neighbor(location::cell, i, 2, j, 1) =
-            index(location::cell, i, 0, j);
+        m_edges.neighbor(location::cell, i, 2, j, 0) = m_cells.index(i, 1, j);
+        m_edges.neighbor(location::cell, i, 2, j, 1) = m_cells.index(i, 0, j);
 
-        if (i < isize - 1)
-          m_edges.neighbor(location::vertex, i, 0, j, 0) =
-              index(location::vertex, i + 1, 0, j);
+        m_edges.neighbor(location::vertex, i, 0, j, 0) =
+            m_nodes.index(i + 1, 0, j);
 
-        m_edges.neighbor(location::vertex, i, 0, j, 1) =
-            index(location::vertex, i, 0, j);
+        m_edges.neighbor(location::vertex, i, 0, j, 1) = m_nodes.index(i, 0, j);
 
-        m_edges.neighbor(location::vertex, i, 1, j, 0) =
-            index(location::vertex, i, 0, j);
+        m_edges.neighbor(location::vertex, i, 1, j, 0) = m_nodes.index(i, 0, j);
 
-        if (j < jsize - 1)
-          m_edges.neighbor(location::vertex, i, 1, j, 1) =
-              index(location::vertex, i, 0, j + 1);
+        m_edges.neighbor(location::vertex, i, 1, j, 1) =
+            m_nodes.index(i, 0, j + 1);
 
-        if (j < jsize - 1)
-          m_edges.neighbor(location::vertex, i, 2, j, 0) =
-              index(location::vertex, i, 0, j + 1);
+        m_edges.neighbor(location::vertex, i, 2, j, 0) =
+            m_nodes.index(i, 0, j + 1);
 
-        if (i < isize - 1)
-          m_edges.neighbor(location::vertex, i, 2, j, 1) =
-              index(location::vertex, i + 1, 0, j);
+        m_edges.neighbor(location::vertex, i, 2, j, 1) =
+            m_nodes.index(i + 1, 0, j);
 
-        if (j > 0)
-          m_nodes.neighbor(location::vertex, i, 0, j, 0) =
-              index(location::vertex, i, 0, j - 1);
-        if (j < jsize - 1)
-          m_nodes.neighbor(location::vertex, i, 0, j, 1) =
-              index(location::vertex, i, 0, j + 1);
-        if (i < isize - 1)
-          m_nodes.neighbor(location::vertex, i, 0, j, 2) =
-              index(location::vertex, i + 1, 0, j);
-        if (i > 0)
-          m_nodes.neighbor(location::vertex, i, 0, j, 3) =
-              index(location::vertex, i - 1, 0, j);
-        if (i < isize - 1 && j > 0)
-          m_nodes.neighbor(location::vertex, i, 0, j, 4) =
-              index(location::vertex, i + 1, 0, j - 1);
-        if (i > 0 && j < jsize - 1)
-          m_nodes.neighbor(location::vertex, i, 0, j, 5) =
-              index(location::vertex, i - 1, 0, j + 1);
+        m_nodes.neighbor(location::vertex, i, 0, j, 0) =
+            m_nodes.index(i, 0, j - 1);
+        m_nodes.neighbor(location::vertex, i, 0, j, 1) =
+            m_nodes.index(i, 0, j + 1);
+        m_nodes.neighbor(location::vertex, i, 0, j, 2) =
+            m_nodes.index(i + 1, 0, j);
+        m_nodes.neighbor(location::vertex, i, 0, j, 3) =
+            m_nodes.index(i - 1, 0, j);
+        m_nodes.neighbor(location::vertex, i, 0, j, 4) =
+            m_nodes.index(i + 1, 0, j - 1);
+        m_nodes.neighbor(location::vertex, i, 0, j, 5) =
+            m_nodes.index(i - 1, 0, j + 1);
 
-        if (j > 0)
-          m_nodes.neighbor(location::edge, i, 0, j, 0) =
-              index(location::edge, i, 1, j - 1);
-        if (i > 0)
-          m_nodes.neighbor(location::edge, i, 0, j, 1) =
-              index(location::edge, i - 1, 0, j);
-        if (i > 0)
-          m_nodes.neighbor(location::edge, i, 0, j, 2) =
-              index(location::edge, i - 1, 2, j);
-        m_nodes.neighbor(location::edge, i, 0, j, 3) =
-            index(location::edge, i, 1, j);
-        m_nodes.neighbor(location::edge, i, 0, j, 4) =
-            index(location::edge, i, 0, j);
-        if (j > 0)
-          m_nodes.neighbor(location::edge, i, 0, j, 5) =
-              index(location::edge, i, 2, j - 1);
+        m_nodes.neighbor(location::edge, i, 0, j, 0) =
+            m_edges.index(i, 1, j - 1);
+        m_nodes.neighbor(location::edge, i, 0, j, 1) =
+            m_edges.index(i - 1, 0, j);
+        m_nodes.neighbor(location::edge, i, 0, j, 2) =
+            m_edges.index(i - 1, 2, j);
+        m_nodes.neighbor(location::edge, i, 0, j, 3) = m_edges.index(i, 1, j);
+        m_nodes.neighbor(location::edge, i, 0, j, 4) = m_edges.index(i, 0, j);
+        m_nodes.neighbor(location::edge, i, 0, j, 5) =
+            m_edges.index(i, 2, j - 1);
 
         m_nodes.x(index(location::vertex, i, 0, j)) = i + j * 0.5;
         m_nodes.y(index(location::vertex, i, 0, j)) = j;
