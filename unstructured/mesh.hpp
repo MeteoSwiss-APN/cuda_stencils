@@ -50,12 +50,12 @@ public:
       : m_loc(loc), m_isize(isize), m_jsize(jsize), m_nhalow(nhalow),
         m_nhalos(nhalos), m_nhaloe(nhaloe), m_nhalon(nhalon) {}
 
-private:
+
   location m_loc;
   size_t m_isize, m_jsize;
   size_t m_nhalow, m_nhalos, m_nhaloe, m_nhalon;
 
-public:
+
   size_t last_compute_domain_idx() {
     return (m_isize)*num_colors(m_loc) * (m_jsize);
   }
@@ -132,6 +132,7 @@ public:
 };
 
 class elements {
+public:
   static constexpr size_t size_of_array(const location primary_loc,
                                         const unsigned int isize,
                                         const unsigned int jsize,
@@ -140,7 +141,7 @@ class elements {
            sizeof(size_t);
   }
 
-public:
+
   elements(location primary_loc, size_t isize, size_t jsize, size_t nhalo)
       : m_loc(primary_loc), m_isize(isize), m_jsize(jsize), m_nhalo(nhalo),
         m_elements_to_cells(primary_loc, location::cell, isize, jsize, nhalo),
@@ -245,7 +246,7 @@ public:
     return 0;
   }
 
-private:
+
   location m_loc;
   size_t *m_idx;
   size_t m_isize, m_jsize, m_nhalo;
@@ -255,7 +256,7 @@ private:
 };
 
 class nodes {
-
+public:
   template <typename T>
   static constexpr size_t
   size_of_mesh_fields(const location loc, const unsigned int isize,
@@ -263,7 +264,7 @@ class nodes {
     return num_nodes(isize, jsize, nhalo + 1) * num_colors(loc) * sizeof(T);
   }
 
-public:
+
   size_t totald_size() const {
     return num_nodes(m_isize, m_jsize, m_nhalo + 1);
   }
@@ -392,7 +393,7 @@ public:
   double &x(unsigned int idx) { return m_x[idx]; }
   double &y(unsigned int idx) { return m_y[idx]; }
 
-private:
+
   size_t m_isize, m_jsize, m_nhalo;
   double *m_x;
   double *m_y;
@@ -455,10 +456,10 @@ private:
 ///
 
 class mesh {
-
+public:
   size_t end_idx_compute_domain() { return m_isize * m_jsize; }
 
-public:
+
   nodes &get_nodes() { return m_nodes; }
 
   elements &get_elements(location loc) {
@@ -909,7 +910,7 @@ public:
     msh_file.close();
   }
 
-private:
+
   size_t m_isize, m_jsize, m_nhalo;
   std::array<int, 2> m_i_domain, m_j_domain;
   size_t m_curr_idx;
